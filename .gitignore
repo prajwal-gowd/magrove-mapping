@@ -1,0 +1,16 @@
+# Model checkpoints and weights
+checkpoints/
+
+# Dataset files
+dataset_patches/
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
