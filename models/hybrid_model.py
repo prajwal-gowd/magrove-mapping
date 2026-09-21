@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from models.resnet_backbone import ResNetBackbone
-from models.transformer_encoder import TransformerModule
+from .resnet_backbone import ResNetBackbone
+from .transformer_encoder import TransformerModule
 import config
 
 class HybridTCCFNet(nn.Module):
