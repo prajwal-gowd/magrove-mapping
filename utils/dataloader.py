@@ -81,9 +81,9 @@ class SegmentationDataset(Dataset):
                 translate = [random.randint(-20, 20), random.randint(-20, 20)]
                 scale_factor = random.uniform(0.9, 1.1)
                 shear = random.uniform(-10, 10)
-                image = TF.affine(image, angle, translate, scale_factor, shear)
-                mask = TF.affine(image=mask, angle=angle, translate=translate,
-                                 scale=scale_factor, shear=shear,
+                image = TF.affine(image, angle=angle, translate=translate, scale=scale_factor, shear=[shear, 0.0])
+                mask = TF.affine(mask, angle=angle, translate=translate,
+                                 scale=scale_factor, shear=[shear, 0.0],
                                  interpolation=TF.InterpolationMode.NEAREST)
 
             # --- Color Jitter (image only — not mask) ---
