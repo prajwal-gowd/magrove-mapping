@@ -18,9 +18,9 @@ BACKBONE_FREEZE_EPOCHS = 5    # Freeze backbone for first N epochs
 SAVE_PATH = "checkpoints/best_model.pth"
 
 # Loss Config
-BCE_WEIGHT = 0.3              # Lower BCE weight
-DICE_WEIGHT = 0.7             # Higher Dice weight (directly optimizes IoU proxy)
-FOCAL_ALPHA = 0.75            # Focal loss alpha for class balance
+BCE_WEIGHT = 0.5              # Balanced BCE weight
+DICE_WEIGHT = 0.5             # Balanced Dice weight
+FOCAL_ALPHA = 0.45            # Lower Focal loss alpha to balance precision/recall
 FOCAL_GAMMA = 2.0             # Focal loss gamma for hard example mining
 
 # Model Config

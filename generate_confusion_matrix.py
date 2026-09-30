@@ -50,7 +50,7 @@ def generate_cm():
             images = images.to(device)
             masks = masks.to(device)
             outputs = model(images)
-            preds = (torch.sigmoid(outputs) > 0.5).float()
+            preds = (torch.sigmoid(outputs) > 0.65).float()
             tp, tn, fp, fn = calculate_confusion_matrix_elements(preds, masks)
             total_tp += tp
             total_tn += tn

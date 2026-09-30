@@ -219,7 +219,7 @@ async def predict(file: UploadFile = File(...)):
     prob_map = predict_tiles(image)
 
     # Binary mask
-    mask_np = (prob_map >= 0.5).astype(np.uint8) * 255
+    mask_np = (prob_map >= 0.65).astype(np.uint8) * 255
     mask_bool = mask_np > 0
 
     # --- Confidence heatmap (green gradient) ---------------------------

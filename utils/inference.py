@@ -52,7 +52,7 @@ def predict(model, image_path_or_pil, device):
     with torch.no_grad():
         logits = model(img_tensor) # [1, 1, 224, 224]
         probs = torch.sigmoid(logits)
-        mask = (probs > 0.5).float().squeeze() # [224, 224]
+        mask = (probs > 0.65).float().squeeze() # [224, 224]
         
     mask_array = (mask.cpu().numpy() * 255).astype(np.uint8)
     return mask_array

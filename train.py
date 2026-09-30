@@ -185,7 +185,7 @@ def train(resume=False):
                         val_loss += loss.item() * images.size(0)
 
                         # Calculate metrics
-                        preds = (torch.sigmoid(outputs) > 0.5).float()
+                        preds = (torch.sigmoid(outputs) > 0.65).float()
                         val_iou += calculate_iou(preds, masks) * images.size(0)
                         val_dice += calculate_dice(preds, masks) * images.size(0)
                         val_precision += calculate_precision(preds, masks) * images.size(0)
