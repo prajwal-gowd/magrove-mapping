@@ -1,0 +1,6 @@
+# Install the CPU wheels first; this avoids downloading CUDA runtimes.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.7.1+cpu
+torchvision==0.22.1+cpu
+
+-r requirements.txt

@@ -1,9 +1,23 @@
 import torch
-import torch.nn.functional as F
 from PIL import Image
 import torchvision.transforms.functional as TF
 import config
 import numpy as np
+
+
+def load_model_checkpoint(model, checkpoint_path, device):
+    """Load either a training checkpoint or a raw model state dictionary."""
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except TypeError:
+        # `weights_only` was added after older supported PyTorch releases.
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    state_dict = checkpoint.get("model_state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()
+    return model
+
 
 def preprocess_image(image_path_or_pil):
     """

@@ -5,10 +5,10 @@ from .transformer_encoder import TransformerModule
 import config
 
 class HybridTCCFNet(nn.Module):
-    def __init__(self, num_classes=1, backbone_freeze=False):
+    def __init__(self, num_classes=1, backbone_freeze=False, pretrained_backbone=True):
         super(HybridTCCFNet, self).__init__()
         
-        self.cnn = ResNetBackbone()
+        self.cnn = ResNetBackbone(pretrained=pretrained_backbone)
         
         if backbone_freeze:
             for param in self.cnn.parameters():

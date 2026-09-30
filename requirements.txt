@@ -1,7 +1,12 @@
 torch
 torchvision
 streamlit
+fastapi
+uvicorn[standard]
+python-multipart
 Pillow
+numpy
 scikit-learn
 matplotlib
 tqdm
+seaborn

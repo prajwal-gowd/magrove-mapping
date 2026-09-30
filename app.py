@@ -1,11 +1,9 @@
 import streamlit as st
-import torch
 from PIL import Image
-import numpy as np
 import os
 import config
 from models.hybrid_model import HybridTCCFNet
-from utils.inference import predict
+from utils.inference import load_model_checkpoint, predict
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -41,16 +39,18 @@ st.markdown("""
 @st.cache_resource
 def load_model():
     """Loads the model, preferably from checkpoint if available."""
-    model = HybridTCCFNet(num_classes=config.NUM_CLASSES)
+    model = HybridTCCFNet(num_classes=config.NUM_CLASSES, pretrained_backbone=False)
     
     if os.path.exists(config.SAVE_PATH):
         try:
-            model.load_state_dict(torch.load(config.SAVE_PATH, map_location=config.DEVICE))
+            load_model_checkpoint(model, config.SAVE_PATH, config.DEVICE)
             st.success("Loaded trained model checkpoint!")
         except Exception as e:
-            st.warning(f"Could not load checkpoint: {e}")
+            st.error(f"Could not load the trained checkpoint: {e}")
+            st.stop()
     else:
-        st.info("No checkpoint found. Using untrained model.")
+        st.error(f"Checkpoint not found at {config.SAVE_PATH}. Train the model or restore the checkpoint.")
+        st.stop()
         
     model.to(config.DEVICE)
     model.eval()

@@ -3,10 +3,11 @@ import torch.nn as nn
 from torchvision.models import resnet50, ResNet50_Weights
 
 class ResNetBackbone(nn.Module):
-    def __init__(self):
+    def __init__(self, pretrained=True):
         super(ResNetBackbone, self).__init__()
         # Load a pretrained ResNet50
-        resnet = resnet50(weights=ResNet50_Weights.DEFAULT)
+        weights = ResNet50_Weights.DEFAULT if pretrained else None
+        resnet = resnet50(weights=weights)
         
         # We want to extract spatial feature maps, so we remove the Global Average Pooling and FC layer.
         # resnet essentially consists of:

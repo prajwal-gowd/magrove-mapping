@@ -34,7 +34,7 @@ The project is built using Python and PyTorch. Follow these steps to set up a cl
 
 4. **Install dependencies**:
    ```bash
-   pip install -r requirements.txt
+   python -m pip install -r requirements-cpu.txt
    ```
 
 ## 2. Dataset Preparation
