@@ -32,7 +32,25 @@ class SegmentationDataset(Dataset):
             print(f"Warning: Dataset split '{split}' not found at {self.image_dir}")
             self.images = []
         else:
-            self.images = sorted(os.listdir(self.image_dir))
+            raw_images = sorted(os.listdir(self.image_dir))
+            valid_images = []
+            for fname in raw_images:
+                img_path = os.path.join(self.image_dir, fname)
+                mask_path = os.path.join(self.mask_dir, fname)
+                if not os.path.exists(mask_path):
+                    continue
+                try:
+                    extrema = Image.open(img_path).getextrema()
+                    # Filter out corrupted / empty satellite tiles (NODATA all-zero pixels)
+                    if isinstance(extrema, tuple) and isinstance(extrema[0], tuple):
+                        if all(hi == 0 for _, hi in extrema):
+                            continue
+                    elif isinstance(extrema, tuple) and extrema[1] == 0:
+                        continue
+                    valid_images.append(fname)
+                except Exception:
+                    continue
+            self.images = valid_images
 
     def __len__(self):
         return len(self.images)
