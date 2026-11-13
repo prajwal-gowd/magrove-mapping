@@ -2,8 +2,8 @@ import streamlit as st
 from PIL import Image
 import os
 import config
-from models.hybrid_model import HybridTCCFNet
-from utils.inference import load_model_checkpoint, predict
+from models.legacy_hybrid_model import LegacyHybridTCCFNet
+from utils.inference import load_model_checkpoint, predict, load_segmentation_model
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -39,19 +39,27 @@ st.markdown("""
 @st.cache_resource
 def load_model():
     """Loads the model, preferably from checkpoint if available."""
-    model = HybridTCCFNet(num_classes=config.NUM_CLASSES, pretrained_backbone=False)
-    
+    if os.path.exists(config.SAVE_PATH):
+        try:
+            model = load_segmentation_model(config.SAVE_PATH, config.DEVICE)
+            st.success("Loaded trained model checkpoint!")
+            return model
+        except Exception as e:
+            st.warning(f"Auto-detector fallback ({e})...")
+
+    model = LegacyHybridTCCFNet(num_classes=config.NUM_CLASSES, pretrained_backbone=False)
+
     if os.path.exists(config.SAVE_PATH):
         try:
             load_model_checkpoint(model, config.SAVE_PATH, config.DEVICE)
-            st.success("Loaded trained model checkpoint!")
+            st.success("Loaded legacy model checkpoint!")
         except Exception as e:
             st.error(f"Could not load the trained checkpoint: {e}")
             st.stop()
     else:
         st.error(f"Checkpoint not found at {config.SAVE_PATH}. Train the model or restore the checkpoint.")
         st.stop()
-        
+
     model.to(config.DEVICE)
     model.eval()
     return model

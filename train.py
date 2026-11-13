@@ -33,15 +33,42 @@ def get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_st
     return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
-def train(resume=False):
+def train(
+    resume=False,
+    batch_size=None,
+    learning_rate=None,
+    backbone_lr=None,
+    num_epochs=None,
+    warmup_epochs=None,
+    freeze_epochs=None,
+    val_threshold=None,
+    bce_weight=None,
+    dice_weight=None,
+    focal_alpha=None,
+    focal_gamma=None,
+    save_path=None,
+):
     print("Initializing training pipeline...")
     print(f"Device: {config.DEVICE}")
 
+    batch_size = batch_size or config.BATCH_SIZE
+    learning_rate = learning_rate or config.LEARNING_RATE
+    backbone_lr = backbone_lr or config.BACKBONE_LR
+    num_epochs = num_epochs or config.NUM_EPOCHS
+    warmup_epochs = warmup_epochs if warmup_epochs is not None else config.WARMUP_EPOCHS
+    freeze_epochs = freeze_epochs if freeze_epochs is not None else config.BACKBONE_FREEZE_EPOCHS
+    val_threshold = val_threshold if val_threshold is not None else config.VAL_THRESHOLD
+    bce_weight = bce_weight if bce_weight is not None else config.BCE_WEIGHT
+    dice_weight = dice_weight if dice_weight is not None else config.DICE_WEIGHT
+    focal_alpha = focal_alpha if focal_alpha is not None else config.FOCAL_ALPHA
+    focal_gamma = focal_gamma if focal_gamma is not None else config.FOCAL_GAMMA
+    save_path = save_path or config.SAVE_PATH
+
     # Create checkpoints dir
-    os.makedirs(os.path.dirname(config.SAVE_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
     # Load Data
-    train_loader, val_loader = get_dataloaders()
+    train_loader, val_loader = get_dataloaders(batch_size=batch_size)
     if train_loader is None:
         print("Failed to load dataloaders. Check dataset path.")
         return
@@ -56,26 +83,23 @@ def train(resume=False):
     # Loss — FocalDiceLoss (Focal + Dice) replaces plain BCEDiceLoss
     # -----------------------------------------------------------------------
     criterion = FocalDiceLoss(
-        focal_weight=config.BCE_WEIGHT,
-        dice_weight=config.DICE_WEIGHT,
-        alpha=config.FOCAL_ALPHA,
-        gamma=config.FOCAL_GAMMA,
+        focal_weight=bce_weight,
+        dice_weight=dice_weight,
+        alpha=focal_alpha,
+        gamma=focal_gamma,
     )
 
     # -----------------------------------------------------------------------
     # Optimizer — AdamW with differential LR and weight decay
     # -----------------------------------------------------------------------
-    param_groups = model.get_param_groups(
-        backbone_lr=config.BACKBONE_LR,
-        decoder_lr=config.LEARNING_RATE,
-    )
+    param_groups = model.get_param_groups(backbone_lr=backbone_lr, decoder_lr=learning_rate)
     optimizer = optim.AdamW(param_groups, weight_decay=config.WEIGHT_DECAY)
 
     # -----------------------------------------------------------------------
     # Scheduler — linear warmup + cosine annealing
     # -----------------------------------------------------------------------
-    total_steps = config.NUM_EPOCHS * len(train_loader)
-    warmup_steps = config.WARMUP_EPOCHS * len(train_loader)
+    total_steps = num_epochs * len(train_loader)
+    warmup_steps = warmup_epochs * len(train_loader)
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
     best_val_iou = 0.0
@@ -84,10 +108,10 @@ def train(resume=False):
     # -----------------------------------------------------------------------
     # Resume from checkpoint
     # -----------------------------------------------------------------------
-    if resume and os.path.exists(config.SAVE_PATH):
-        print(f"Loading checkpoint from {config.SAVE_PATH}...")
+    if resume and os.path.exists(save_path):
+        print(f"Loading checkpoint from {save_path}...")
         try:
-            checkpoint = torch.load(config.SAVE_PATH, map_location="cpu",
+            checkpoint = torch.load(save_path, map_location="cpu",
                                     weights_only=False)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 model.load_state_dict(checkpoint["model_state_dict"], strict=False)
@@ -105,15 +129,15 @@ def train(resume=False):
     # -----------------------------------------------------------------------
     # Epoch loop
     # -----------------------------------------------------------------------
-    for epoch in range(start_epoch, config.NUM_EPOCHS):
+    for epoch in range(start_epoch, num_epochs):
         current_epoch = epoch + 1
-        print(f"\nEpoch {current_epoch}/{config.NUM_EPOCHS}")
+        print(f"\nEpoch {current_epoch}/{num_epochs}")
 
         # --- Backbone freeze / unfreeze schedule --------------------------
-        if current_epoch <= config.BACKBONE_FREEZE_EPOCHS:
+        if current_epoch <= freeze_epochs:
             model.freeze_backbone()
             print("  [Backbone FROZEN — training decoder & transformer only]")
-        elif current_epoch == config.BACKBONE_FREEZE_EPOCHS + 1:
+        elif current_epoch == freeze_epochs + 1:
             model.unfreeze_backbone()
             print("  [Backbone UNFROZEN — full fine-tuning]")
 
@@ -185,7 +209,7 @@ def train(resume=False):
                         val_loss += loss.item() * images.size(0)
 
                         # Calculate metrics
-                        preds = (torch.sigmoid(outputs) > 0.65).float()
+                        preds = (torch.sigmoid(outputs) > val_threshold).float()
                         val_iou += calculate_iou(preds, masks) * images.size(0)
                         val_dice += calculate_dice(preds, masks) * images.size(0)
                         val_precision += calculate_precision(preds, masks) * images.size(0)
@@ -225,7 +249,8 @@ def train(resume=False):
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "best_val_iou": best_val_iou,
-                }, config.SAVE_PATH)
+                    "val_threshold": val_threshold,
+                }, save_path)
                 print(f"--> Saved new best model with IoU: {best_val_iou:.4f}")
         else:
             # If no validation set, just save the latest model
@@ -234,7 +259,8 @@ def train(resume=False):
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "best_val_iou": best_val_iou,
-            }, config.SAVE_PATH)
+                "val_threshold": val_threshold,
+            }, save_path)
 
     print(f"\nTraining complete. Best Val IoU: {best_val_iou:.4f}")
 
@@ -243,5 +269,31 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--resume", action="store_true",
                         help="Resume training from checkpoint")
+    parser.add_argument("--batch-size", type=int)
+    parser.add_argument("--lr", type=float, dest="learning_rate")
+    parser.add_argument("--backbone-lr", type=float)
+    parser.add_argument("--epochs", type=int, dest="num_epochs")
+    parser.add_argument("--warmup-epochs", type=int)
+    parser.add_argument("--freeze-epochs", type=int)
+    parser.add_argument("--threshold", type=float, dest="val_threshold")
+    parser.add_argument("--bce-weight", type=float)
+    parser.add_argument("--dice-weight", type=float)
+    parser.add_argument("--focal-alpha", type=float)
+    parser.add_argument("--focal-gamma", type=float)
+    parser.add_argument("--save-path")
     args = parser.parse_args()
-    train(resume=args.resume)
+    train(
+        resume=args.resume,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        backbone_lr=args.backbone_lr,
+        num_epochs=args.num_epochs,
+        warmup_epochs=args.warmup_epochs,
+        freeze_epochs=args.freeze_epochs,
+        val_threshold=args.val_threshold,
+        bce_weight=args.bce_weight,
+        dice_weight=args.dice_weight,
+        focal_alpha=args.focal_alpha,
+        focal_gamma=args.focal_gamma,
+        save_path=args.save_path,
+    )

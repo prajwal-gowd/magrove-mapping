@@ -25,6 +25,7 @@ def generate_cm():
         model.load_state_dict(checkpoint['model_state_dict'])
         best_val_iou = checkpoint.get('best_val_iou', 0.0)
         epoch = checkpoint.get('epoch', 0)
+        config.VAL_THRESHOLD = checkpoint.get('val_threshold', config.VAL_THRESHOLD)
     else:
         model.load_state_dict(checkpoint)
         best_val_iou = 0.4716  # From logs if metadata is missing
@@ -50,7 +51,7 @@ def generate_cm():
             images = images.to(device)
             masks = masks.to(device)
             outputs = model(images)
-            preds = (torch.sigmoid(outputs) > 0.65).float()
+            preds = (torch.sigmoid(outputs) > config.VAL_THRESHOLD).float()
             tp, tn, fp, fn = calculate_confusion_matrix_elements(preds, masks)
             total_tp += tp
             total_tn += tn

@@ -15,6 +15,7 @@ NUM_EPOCHS = 50               # More epochs for convergence
 WARMUP_EPOCHS = 3             # Linear warmup before cosine decay
 GRAD_CLIP_MAX_NORM = 1.0      # Gradient clipping
 BACKBONE_FREEZE_EPOCHS = 5    # Freeze backbone for first N epochs
+VAL_THRESHOLD = 0.65          # Probability threshold used for validation metrics
 SAVE_PATH = "checkpoints/best_model.pth"
 
 # Loss Config
@@ -30,6 +31,13 @@ TRANSFORMER_HEADS = 8
 TRANSFORMER_DIM_FEEDFORWARD = 512
 DROPOUT = 0.1
 DECODER_DROPOUT = 0.2         # Dropout in decoder to reduce overfitting
+
+# Model Architecture Selection
+MODEL_TYPE = os.getenv("MODEL_TYPE", "segformer")  # 'segformer' or 'hybrid'
+SEGFORMER_BACKBONE = "mit_b3"                     # 'mit_b0', 'mit_b2', 'mit_b3', 'mit_b4'
+ENCODER_LR = 6e-5                                 # Pretrained transformer encoder LR
+DECODER_LR = 3e-4                                 # SegFormer MLP decoder LR
+LOVASZ_WEIGHT = 0.3                               # Weight for Lovász-Hinge (IoU surrogate) loss
 
 # Device Config
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")

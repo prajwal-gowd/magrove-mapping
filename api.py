@@ -11,9 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse
 
-from config import SAVE_PATH, IMAGE_SIZE, DEVICE
-from models.hybrid_model import HybridTCCFNet
-from utils.inference import load_model_checkpoint, preprocess_image
+from config import SAVE_PATH, IMAGE_SIZE, DEVICE, VAL_THRESHOLD
+from models.legacy_hybrid_model import LegacyHybridTCCFNet
+from utils.inference import load_model_checkpoint, preprocess_image, load_segmentation_model
 
 app = FastAPI(title="Mangrove Classification API")
 
@@ -45,17 +45,19 @@ TILE_STRIDE = 200       # 24 px overlap for smooth seams
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=1)
 def get_model():
-    """Instantiate HybridTCCFNet and load the best checkpoint (cached)."""
-    model = HybridTCCFNet(pretrained_backbone=False)
-    try:
-        model = load_model_checkpoint(model, SAVE_PATH, DEVICE)
-    except TypeError:
-        # Fallback for older signature
-        checkpoint = torch.load(SAVE_PATH, map_location=DEVICE, weights_only=False)
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            model.load_state_dict(checkpoint)
+    """Instantiate model and load the best checkpoint (cached)."""
+    if os.path.exists(SAVE_PATH):
+        try:
+            return load_segmentation_model(SAVE_PATH, DEVICE)
+        except Exception as e:
+            print(f"Warning: Failed loading with auto-detector ({e}), falling back to Legacy...")
+
+    model = LegacyHybridTCCFNet(pretrained_backbone=False)
+    if os.path.exists(SAVE_PATH):
+        try:
+            model = load_model_checkpoint(model, SAVE_PATH, DEVICE)
+        except Exception:
+            pass
     model = model.to(DEVICE)
     model.eval()
     return model
@@ -219,7 +221,7 @@ async def predict(file: UploadFile = File(...)):
     prob_map = predict_tiles(image)
 
     # Binary mask
-    mask_np = (prob_map >= 0.65).astype(np.uint8) * 255
+    mask_np = (prob_map >= VAL_THRESHOLD).astype(np.uint8) * 255
     mask_bool = mask_np > 0
 
     # --- Confidence heatmap (green gradient) ---------------------------

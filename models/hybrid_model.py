@@ -4,7 +4,47 @@ from .resnet_backbone import ResNetBackbone
 from .transformer_encoder import TransformerModule
 import config
 
+
+class DecoderBlock(nn.Module):
+    """Double-conv block used in UNet-style decoder stages."""
+
+    def __init__(self, in_channels, out_channels, dropout=0.0):
+        super().__init__()
+        layers = [
+            nn.Conv2d(in_channels, out_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        ]
+        if dropout > 0:
+            layers.append(nn.Dropout2d(dropout))
+        self.block = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.block(x)
+
+
 class HybridTCCFNet(nn.Module):
+    """
+    Improved HybridTCCFNet with UNet-style skip connections.
+
+    Key improvements over v1:
+    1. Skip connections from ResNet layers 1-3 to decoder stages,
+       preserving fine-grained spatial detail for boundary segmentation.
+    2. Transformer returns spatially-refined features (not just CLS token),
+       so attention patterns are preserved in the feature fusion.
+    3. 1x1 bottleneck convolution reduces the fused 4096-channel features
+       before decoding, cutting parameters by ~14M.
+
+    Architecture:
+        Encoder: ResNet-50 backbone -> multi-scale features
+        Transformer: Self-attention on deepest features (7x7)
+        Fusion: Concatenate CNN + Transformer spatial features
+        Decoder: UNet-style progressive upsampling with skip connections
+    """
+
     def __init__(self, num_classes=1, backbone_freeze=False, pretrained_backbone=True):
         super(HybridTCCFNet, self).__init__()
 
@@ -21,41 +61,39 @@ class HybridTCCFNet(nn.Module):
             num_layers=config.TRANSFORMER_LAYERS,
             dim_feedforward=config.TRANSFORMER_DIM_FEEDFORWARD,
             dropout=config.DROPOUT,
-            feat_h=7, # Expected ResNet50 spatial output size for 224x224 input
-            feat_w=7
+            feat_h=7,  # Expected ResNet50 spatial output size for 224x224 input
+            feat_w=7,
         )
 
-        # Decoder dropout rate (configurable, default 0.2)
-        dec_drop = getattr(config, "DECODER_DROPOUT", 0.0)
+        dec_drop = getattr(config, "DECODER_DROPOUT", 0.2)
 
-        # Segmentation Decoder: from [B, 4096, 7, 7] to [B, num_classes, 224, 224]
-        # Added Dropout2d layers between stages to reduce overfitting
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(4096, 512, kernel_size=4, stride=2, padding=1), # -> 14x14
-            nn.BatchNorm2d(512),
-            nn.ReLU(),
-            nn.Dropout2d(dec_drop),
-
-            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1), # -> 28x28
-            nn.BatchNorm2d(256),
-            nn.ReLU(),
-            nn.Dropout2d(dec_drop),
-
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1), # -> 56x56
-            nn.BatchNorm2d(128),
-            nn.ReLU(),
-            nn.Dropout2d(dec_drop),
-
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1), # -> 112x112
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1), # -> 224x224
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-
-            nn.Conv2d(32, num_classes, kernel_size=1) # -> 224x224
+        # Bottleneck: reduce fused channels (4096 -> 1024) with 1x1 conv
+        self.bottleneck = nn.Sequential(
+            nn.Conv2d(4096, 1024, kernel_size=1, bias=False),
+            nn.BatchNorm2d(1024),
+            nn.ReLU(inplace=True),
         )
+
+        # ---- UNet Decoder with Skip Connections ----
+        # Stage 3: 7x7 -> 14x14, skip from layer3 (1024ch)
+        self.up3 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.dec3 = DecoderBlock(512 + 1024, 512, dropout=dec_drop)
+
+        # Stage 2: 14x14 -> 28x28, skip from layer2 (512ch)
+        self.up2 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec2 = DecoderBlock(256 + 512, 256, dropout=dec_drop)
+
+        # Stage 1: 28x28 -> 56x56, skip from layer1 (256ch)
+        self.up1 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec1 = DecoderBlock(128 + 256, 128, dropout=dec_drop)
+
+        # Stage 0: 56x56 -> 112x112 (no skip connection)
+        self.up0 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec0 = DecoderBlock(64, 64)
+
+        # Final: 112x112 -> 224x224
+        self.final_up = nn.ConvTranspose2d(64, 32, kernel_size=2, stride=2)
+        self.head = nn.Conv2d(32, num_classes, kernel_size=1)
 
     def freeze_backbone(self):
         """Freeze CNN backbone parameters (for initial decoder-only training)."""
@@ -73,7 +111,8 @@ class HybridTCCFNet(nn.Module):
         Lower LR for pretrained backbone, higher for decoder/transformer.
         """
         backbone_params = list(self.cnn.parameters())
-        other_params = list(self.transformer.parameters()) + list(self.decoder.parameters())
+        backbone_ids = set(id(p) for p in backbone_params)
+        other_params = [p for p in self.parameters() if id(p) not in backbone_ids]
         return [
             {"params": backbone_params, "lr": backbone_lr},
             {"params": other_params, "lr": decoder_lr},
@@ -87,26 +126,41 @@ class HybridTCCFNet(nn.Module):
         Returns:
             Spatial probability logits [B, 1, 224, 224]
         """
-        B = x.size(0)
+        # ---- Encoder ----
+        # x4: deepest features [B, 2048, 7, 7]
+        # skips: [skip1(256,56,56), skip2(512,28,28), skip3(1024,14,14)]
+        x4, _, skips = self.cnn(x)
+        skip1, skip2, skip3 = skips
 
-        # CNN Feature Extraction
-        # spatial_features: [B, 2048, 7, 7]
-        spatial_features, _ = self.cnn(x)
+        # ---- Transformer ----
+        # Spatially-refined features via self-attention [B, 2048, 7, 7]
+        transformer_features = self.transformer(x4)
 
-        # Transformer Processing
-        # global_transformer_features: [B, 2048]
-        global_transformer_features = self.transformer(spatial_features)
+        # ---- Feature Fusion ----
+        fused = torch.cat([x4, transformer_features], dim=1)  # [B, 4096, 7, 7]
+        fused = self.bottleneck(fused)                         # [B, 1024, 7, 7]
 
-        # Feature Fusion
-        # Broadcast transformer features to spatial dims: [B, 2048, 7, 7]
-        global_transformer_broadcast = global_transformer_features.unsqueeze(2).unsqueeze(3).expand(-1, -1, 7, 7)
+        # ---- Decoder with Skip Connections ----
+        d3 = self.up3(fused)                        # [B, 512, 14, 14]
+        d3 = torch.cat([d3, skip3], dim=1)          # [B, 1536, 14, 14]
+        d3 = self.dec3(d3)                          # [B, 512, 14, 14]
 
-        fused_features = torch.cat((spatial_features, global_transformer_broadcast), dim=1) # [B, 4096, 7, 7]
+        d2 = self.up2(d3)                           # [B, 256, 28, 28]
+        d2 = torch.cat([d2, skip2], dim=1)          # [B, 768, 28, 28]
+        d2 = self.dec2(d2)                          # [B, 256, 28, 28]
 
-        # Final Segmentation Decoding
-        logits = self.decoder(fused_features) # [B, 1, 224, 224]
+        d1 = self.up1(d2)                           # [B, 128, 56, 56]
+        d1 = torch.cat([d1, skip1], dim=1)          # [B, 384, 56, 56]
+        d1 = self.dec1(d1)                          # [B, 128, 56, 56]
+
+        d0 = self.up0(d1)                           # [B, 64, 112, 112]
+        d0 = self.dec0(d0)                          # [B, 64, 112, 112]
+
+        out = self.final_up(d0)                     # [B, 32, 224, 224]
+        logits = self.head(out)                     # [B, 1, 224, 224]
 
         return logits
+
 
 def run_dummy_forward():
     print("Running dummy forward pass to test execution...")
@@ -119,8 +173,14 @@ def run_dummy_forward():
     with torch.no_grad():
         output = model(dummy_input)
 
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
     print(f"Output shape: {output.shape} (Expected: [2, {config.NUM_CLASSES}, 224, 224])")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
     print("Dummy forward pass completed successfully.")
+
 
 if __name__ == "__main__":
     run_dummy_forward()

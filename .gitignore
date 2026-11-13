@@ -1,5 +1,10 @@
 # Model checkpoints and weights
 checkpoints/
+mangrove_checkpoints*/
+*.pth
+*.pt
+*.bak
+*.zip
 
 # Dataset files
 dataset_patches/
