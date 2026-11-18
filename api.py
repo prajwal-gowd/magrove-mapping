@@ -41,23 +41,12 @@ TILE_STRIDE = 200       # 24 px overlap for smooth seams
 
 
 # ---------------------------------------------------------------------------
-# Model loading (cached)
+# Model loading (cached) - SegFormer Primary
 # ---------------------------------------------------------------------------
 @lru_cache(maxsize=1)
 def get_model():
-    """Instantiate model and load the best checkpoint (cached)."""
-    if os.path.exists(SAVE_PATH):
-        try:
-            return load_segmentation_model(SAVE_PATH, DEVICE)
-        except Exception as e:
-            print(f"Warning: Failed loading with auto-detector ({e}), falling back to Legacy...")
-
-    model = LegacyHybridTCCFNet(pretrained_backbone=False)
-    if os.path.exists(SAVE_PATH):
-        try:
-            model = load_model_checkpoint(model, SAVE_PATH, DEVICE)
-        except Exception:
-            pass
+    """Instantiate SegFormer as the primary model and load weights."""
+    model = load_segmentation_model(SAVE_PATH, DEVICE)
     model = model.to(DEVICE)
     model.eval()
     return model
@@ -77,11 +66,12 @@ def img_to_base64(img_arr: np.ndarray, mode: str = "L") -> str:
 
 def predict_tiles(image: Image.Image) -> np.ndarray:
     """
-    Run tiled inference on an arbitrary-size RGB image.
+    Run tiled inference on an arbitrary-size RGB image using SegFormer.
 
     For images larger than 224×224 the image is split into overlapping
-    224×224 tiles with a stride of 200.  Probability maps are averaged
-    in overlap regions to produce smooth seams.
+    224×224 tiles with a stride of 200. Probability maps are averaged
+    in overlap regions to produce smooth seams. Uses Test-Time Augmentation
+    (TTA) when available for enhanced boundary delineation.
 
     Returns a float32 probability map of the same spatial size as
     the (possibly up-scaled) input.
@@ -115,8 +105,11 @@ def predict_tiles(image: Image.Image) -> np.ndarray:
             tensor = tensor.to(DEVICE)
 
             with torch.no_grad():
-                logits = model(tensor)
-                probs = torch.sigmoid(logits).cpu().numpy().squeeze()
+                if hasattr(model, "predict_with_tta"):
+                    probs = model.predict_with_tta(tensor).cpu().numpy().squeeze()
+                else:
+                    logits = model(tensor)
+                    probs = torch.sigmoid(logits).cpu().numpy().squeeze()
 
             prob_map[y : y + TILE_SIZE, x : x + TILE_SIZE] += probs
             count_map[y : y + TILE_SIZE, x : x + TILE_SIZE] += 1.0

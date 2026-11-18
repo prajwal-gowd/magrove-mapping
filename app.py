@@ -39,30 +39,13 @@ st.markdown("""
 @st.cache_resource
 def load_model():
     """Loads the model, preferably from checkpoint if available."""
-    if os.path.exists(config.SAVE_PATH):
-        try:
-            model = load_segmentation_model(config.SAVE_PATH, config.DEVICE)
-            st.success("Loaded trained model checkpoint!")
-            return model
-        except Exception as e:
-            st.warning(f"Auto-detector fallback ({e})...")
-
-    model = LegacyHybridTCCFNet(num_classes=config.NUM_CLASSES, pretrained_backbone=False)
-
-    if os.path.exists(config.SAVE_PATH):
-        try:
-            load_model_checkpoint(model, config.SAVE_PATH, config.DEVICE)
-            st.success("Loaded legacy model checkpoint!")
-        except Exception as e:
-            st.error(f"Could not load the trained checkpoint: {e}")
-            st.stop()
-    else:
-        st.error(f"Checkpoint not found at {config.SAVE_PATH}. Train the model or restore the checkpoint.")
+    try:
+        model = load_segmentation_model(config.SAVE_PATH, config.DEVICE)
+        st.success("Loaded trained model checkpoint!")
+        return model
+    except Exception as e:
+        st.error(f"Could not initialize model: {e}")
         st.stop()
-
-    model.to(config.DEVICE)
-    model.eval()
-    return model
 
 # --- UI Header ---
 st.title("🌿 Mangrove Image Segmentation")

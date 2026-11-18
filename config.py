@@ -15,8 +15,10 @@ NUM_EPOCHS = 50               # More epochs for convergence
 WARMUP_EPOCHS = 3             # Linear warmup before cosine decay
 GRAD_CLIP_MAX_NORM = 1.0      # Gradient clipping
 BACKBONE_FREEZE_EPOCHS = 5    # Freeze backbone for first N epochs
-VAL_THRESHOLD = 0.65          # Probability threshold used for validation metrics
-SAVE_PATH = "checkpoints/best_model.pth"
+VAL_THRESHOLD = 0.50          # Optimal threshold for SegFormer
+SAVE_PATH = "checkpoints/segformer_best.pth"
+LEGACY_SAVE_PATH = "checkpoints/best_model.pth"
+USE_TTA = True                # Test-Time Augmentation for higher precision
 
 # Loss Config
 BCE_WEIGHT = 0.5              # Balanced BCE weight

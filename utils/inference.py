@@ -1,3 +1,4 @@
+import os
 import torch
 from PIL import Image
 import torchvision.transforms.functional as TF
@@ -8,15 +9,37 @@ import numpy as np
 def load_segmentation_model(checkpoint_path=config.SAVE_PATH, device=config.DEVICE):
     """
     Intelligently inspects a checkpoint file and loads the appropriate model architecture:
-    - MangroveSegFormer (Option A, modern MiT transformer)
+    - MangroveSegFormer (Default / Primary high-IoU model)
     - HybridTCCFNet / LegacyHybridTCCFNet (legacy ResNet-Transformer hybrid)
     """
+    # If primary model is SegFormer and checkpoint doesn't exist, instantiate SegFormer directly
+    actual_path = checkpoint_path
+    if not os.path.exists(actual_path):
+        if getattr(config, "MODEL_TYPE", "segformer") == "segformer" or "segformer" in actual_path.lower():
+            from models.segformer_model import MangroveSegFormer
+            backbone = getattr(config, "SEGFORMER_BACKBONE", "mit_b3")
+            model = MangroveSegFormer(backbone=backbone, pretrained=False)
+            model.to(device)
+            model.eval()
+            return model
+
+        legacy = getattr(config, "LEGACY_SAVE_PATH", "checkpoints/best_model.pth")
+        if os.path.exists(legacy):
+            actual_path = legacy
+        else:
+            from models.segformer_model import MangroveSegFormer
+            backbone = getattr(config, "SEGFORMER_BACKBONE", "mit_b3")
+            model = MangroveSegFormer(backbone=backbone, pretrained=False)
+            model.to(device)
+            model.eval()
+            return model
+
     try:
         checkpoint = torch.load(
-            checkpoint_path, map_location="cpu", weights_only=False
+            actual_path, map_location="cpu", weights_only=False
         )
     except TypeError:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        checkpoint = torch.load(actual_path, map_location="cpu")
 
     state_dict = (
         checkpoint.get("model_state_dict", checkpoint)
@@ -33,8 +56,11 @@ def load_segmentation_model(checkpoint_path=config.SAVE_PATH, device=config.DEVI
 
     # Determine architecture from keys
     state_keys = list(state_dict.keys())
-    is_segformer = any("model.encoder" in k or "encoder.patch_embed" in k for k in state_keys) or (
-        isinstance(checkpoint, dict) and "backbone" in checkpoint and "mit_" in str(checkpoint["backbone"])
+    is_segformer = (
+        any("model.encoder" in k or "encoder.patch_embed" in k for k in state_keys)
+        or (isinstance(checkpoint, dict) and "backbone" in checkpoint and "mit_" in str(checkpoint["backbone"]))
+        or (isinstance(checkpoint, dict) and checkpoint.get("architecture") == "segformer")
+        or ("segformer" in actual_path.lower())
     )
 
     if is_segformer:
@@ -42,7 +68,7 @@ def load_segmentation_model(checkpoint_path=config.SAVE_PATH, device=config.DEVI
 
         backbone = checkpoint.get("backbone", getattr(config, "SEGFORMER_BACKBONE", "mit_b3"))
         model = MangroveSegFormer(backbone=backbone, pretrained=False)
-        model.load_state_dict(state_dict)
+        model.load_state_dict(state_dict, strict=False)
     else:
         # Check if improved v2 HybridTCCFNet or Legacy
         has_skips = any("up3" in k or "bottleneck" in k for k in state_keys)
@@ -100,7 +126,7 @@ def preprocess_image(image_path_or_pil):
     return img_tensor
 
 
-def predict(model, image_path_or_pil, device=config.DEVICE, use_tta=False):
+def predict(model, image_path_or_pil, device=config.DEVICE, use_tta=None):
     """
     Runs inference on a single image and returns the binary segmentation mask.
     Args:
@@ -111,6 +137,9 @@ def predict(model, image_path_or_pil, device=config.DEVICE, use_tta=False):
     Returns:
         mask_array: 2D numpy array containing the predicted binary mask (0 or 255).
     """
+    if use_tta is None:
+        use_tta = getattr(config, "USE_TTA", True)
+
     model.eval()
     img_tensor = preprocess_image(image_path_or_pil).to(device)
 

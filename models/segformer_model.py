@@ -27,12 +27,21 @@ class MangroveSegFormer(nn.Module):
         self.num_classes = num_classes
         weights = "imagenet" if pretrained else None
 
-        self.model = smp.Segformer(
-            encoder_name=backbone,
-            encoder_weights=weights,
-            in_channels=3,
-            classes=num_classes,
-        )
+        try:
+            self.model = smp.Segformer(
+                encoder_name=backbone,
+                encoder_weights=weights,
+                in_channels=3,
+                classes=num_classes,
+            )
+        except Exception:
+            # Fallback to uninitialized weights if offline or download fails
+            self.model = smp.Segformer(
+                encoder_name=backbone,
+                encoder_weights=None,
+                in_channels=3,
+                classes=num_classes,
+            )
         self.dropout = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

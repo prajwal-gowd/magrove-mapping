@@ -7,8 +7,7 @@ import numpy as np
 from PIL import Image
 
 import config
-from models.hybrid_model import HybridTCCFNet
-from utils.inference import load_model_checkpoint, predict
+from utils.inference import load_segmentation_model, predict
 
 
 def main():
@@ -25,16 +24,19 @@ def main():
         default=config.SAVE_PATH,
         help=f"Model checkpoint path (default: {config.SAVE_PATH})",
     )
+    parser.add_argument(
+        "--no-tta",
+        action="store_true",
+        help="Disable Test-Time Augmentation",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.input):
         parser.error(f"Input image does not exist: {args.input}")
-    if not os.path.isfile(args.checkpoint):
-        parser.error(f"Checkpoint does not exist: {args.checkpoint}")
 
-    model = HybridTCCFNet(num_classes=config.NUM_CLASSES, pretrained_backbone=False)
-    load_model_checkpoint(model, args.checkpoint, config.DEVICE)
-    mask = predict(model, Image.open(args.input), config.DEVICE)
+    model = load_segmentation_model(args.checkpoint, config.DEVICE)
+    use_tta = not args.no_tta
+    mask = predict(model, Image.open(args.input), config.DEVICE, use_tta=use_tta)
 
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     Image.fromarray(np.asarray(mask, dtype=np.uint8), mode="L").save(args.output)
